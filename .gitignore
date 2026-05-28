@@ -3,6 +3,7 @@ cache/
 out/
 lib/
 .gitmodules
+remappings.txt
 
 # Ignores development broadcast logs
 !/broadcast
