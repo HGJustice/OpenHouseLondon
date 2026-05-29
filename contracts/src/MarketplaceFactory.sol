@@ -9,7 +9,7 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {CurrencySettler} from "v4-core/test/utils/CurrencySettler.sol";
 import {TransientStateLibrary} from "v4-core/src/libraries/TransientStateLibrary.sol";
-import {ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {SafeCallback} from "v4-periphery/src/base/SafeCallback.sol";
 
 import "./erc20s/yesToken.sol";
@@ -147,11 +147,77 @@ contract MarketplaceFactory is SafeCallback {
         return marketplaces[_marketplaceID];
     }
 
+    function betMarket(
+        uint256 _marketplaceID,
+        bool _decision
+    ) external payable {
+        if (msg.value == 0) revert InsufficientBetAmount();
+        if (_marketplaceID >= marketplaceID) revert InvalidMarketplaceID();
+        Marketplace storage currentMarket = marketplaces[_marketplaceID];
+        if (currentMarket.resolved) revert MarketEnded();
+        // if (block.timestamp >= currentMarket.deadline) revert BettingClosed();
+
+        currentMarket.balance += msg.value;
+
+        YesToken yesToken = YesToken(currentMarket.yesToken);
+        NoToken noToken = NoToken(currentMarket.noToken);
+        yesToken.mintYesToken(msg.value);
+        yesToken.approve(address(poolManager), msg.value);
+        noToken.mintNoToken(msg.value);
+        noToken.approve(address(poolManager), msg.value);
+
+        bool zeroForOne = _decision
+            ? currentMarket.noToken ==
+                Currency.unwrap(currentMarket.pool.currency0)
+            : currentMarket.yesToken ==
+                Currency.unwrap(currentMarket.pool.currency0);
+
+        bytes memory data = abi.encode(
+            currentMarket.pool,
+            msg.value,
+            1,
+            zeroForOne,
+            msg.sender
+        );
+        poolManager.unlock(data);
+
+        if (_decision) {
+            yesToken.transfer(msg.sender, msg.value);
+        } else {
+            noToken.transfer(msg.sender, msg.value);
+        }
+        emit MarketBet(
+            _marketplaceID,
+            currentMarket.title,
+            currentMarket.balance,
+            msg.sender,
+            currentMarket.pool
+        );
+    }
+
+    function withdrawFees() external {
+        if (msg.sender != owner) revert OnlyOwnerAccess();
+
+        // uint256 amount = protocolFeeBalance;
+        protocolFeeBalance = 0;
+        (bool success, ) = payable(owner).call{value: address(this).balance}( //testing purpeses withdraw all eth
+            ""
+        );
+        require(success, "Transfer of protocolFees failed");
+    }
+
+    receive() external payable {}
+
     function _unlockCallback(
         bytes calldata data
     ) internal override returns (bytes memory) {
-        (PoolKey memory poolKey, uint256 amount, uint256 direction) = abi
-            .decode(data, (PoolKey, uint256, uint256));
+        (
+            PoolKey memory poolKey,
+            uint256 amount,
+            uint256 direction,
+            bool decision,
+            address user
+        ) = abi.decode(data, (PoolKey, uint256, uint256, bool, address));
 
         if (direction == 0) {
             poolManager.modifyLiquidity(
@@ -180,23 +246,56 @@ contract MarketplaceFactory is SafeCallback {
                 uint256(-delta1),
                 false
             );
+        } else if (direction == 1) {
+            poolManager.swap(
+                poolKey,
+                SwapParams({
+                    zeroForOne: decision,
+                    amountSpecified: -int256(amount),
+                    sqrtPriceLimitX96: decision
+                        ? TickMath.MIN_SQRT_PRICE + 1
+                        : TickMath.MAX_SQRT_PRICE - 1
+                }),
+                ""
+            );
+
+            (int256 delta0, int256 delta1) = _getCurrencyDelta(poolKey);
+
+            if (delta0 < 0) {
+                poolKey.currency0.settle(
+                    poolManager,
+                    address(this),
+                    uint256(-delta0),
+                    false
+                );
+            } else if (delta0 > 0) {
+                poolKey.currency0.take(
+                    poolManager,
+                    user,
+                    uint256(delta0),
+                    false
+                );
+            }
+
+            if (delta1 < 0) {
+                poolKey.currency1.settle(
+                    poolManager,
+                    address(this),
+                    uint256(-delta1),
+                    false
+                );
+            } else if (delta1 > 0) {
+                poolKey.currency1.take(
+                    poolManager,
+                    user,
+                    uint256(delta1),
+                    false
+                );
+            }
         }
 
         return "";
     }
-
-    function withdrawFees() external {
-        if (msg.sender != owner) revert OnlyOwnerAccess();
-
-        // uint256 amount = protocolFeeBalance;
-        protocolFeeBalance = 0;
-        (bool success, ) = payable(owner).call{value: address(this).balance}( //testing purpeses withdraw all eth
-            ""
-        );
-        require(success, "Transfer of protocolFees failed");
-    }
-
-    receive() external payable {}
 
     function _getCurrencyDelta(
         PoolKey memory _poolKey
