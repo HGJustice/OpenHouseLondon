@@ -27,4 +27,63 @@ contract MarketplaceTestReverts is BaseTest {
         vm.expectRevert(MarketplaceFactory.OnlyOwnerAccess.selector);
         marketplaceContract.withdrawFees();
     }
+
+    function test_invalidBetAmountFail() external {
+        _createDefaultMarket(user1, 0.05 ether);
+
+        vm.prank(user2);
+        vm.expectRevert(MarketplaceFactory.InsufficientBetAmount.selector);
+        marketplaceContract.betMarket{value: 0 ether}(1, true);
+    }
+
+    function test_invalidMarketplaceIDFail() external {
+        _createDefaultMarket(user1, 1 ether);
+        vm.prank(user2);
+        vm.expectRevert(MarketplaceFactory.InvalidMarketplaceID.selector);
+        marketplaceContract.betMarket{value: 0.5 ether}(2, true);
+    }
+
+    function test__betResolvedMarketInvalid() external {
+        _createDefaultMarket(user1, 0.05 ether);
+
+        vm.prank(agent);
+        marketplaceContract.resolveMarket(1, 1);
+
+        vm.prank(user2);
+        vm.expectRevert(MarketplaceFactory.MarketEnded.selector);
+        marketplaceContract.betMarket{value: 0.05 ether}(1, true);
+    }
+
+    function test__invalidUserResolvesMarket() external {
+        _createDefaultMarket(user1, 0.05 ether);
+
+        vm.prank(user2);
+        vm.expectRevert(MarketplaceFactory.OnlyAgentAccess.selector);
+        marketplaceContract.resolveMarket(1, 1);
+    }
+
+    function test__invalidResolveMarketDecision() external {
+        _createDefaultMarket(user1, 0.05 ether);
+
+        vm.prank(agent);
+        vm.expectRevert(MarketplaceFactory.IncorrectDecision.selector);
+        marketplaceContract.resolveMarket(1, 3);
+    }
+
+    function test__invalidMarketplaceIDResolveMarket() external {
+        vm.prank(agent);
+        vm.expectRevert(MarketplaceFactory.InvalidMarketplaceID.selector);
+        marketplaceContract.resolveMarket(1, 1);
+    }
+
+    function test__marketEndedFail() external {
+        _createDefaultMarket(user1, 0.05 ether);
+
+        vm.prank(agent);
+        marketplaceContract.resolveMarket(1, 1);
+
+        vm.prank(agent);
+        vm.expectRevert(MarketplaceFactory.MarketEnded.selector);
+        marketplaceContract.resolveMarket(1, 1);
+    }
 }

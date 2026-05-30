@@ -45,4 +45,22 @@ abstract contract BaseTest is Test, Deployers {
     ) internal view returns (MarketplaceFactory.Marketplace memory) {
         return marketplaceContract.getMarket(_marketplaceID);
     }
+
+    function _betYes(
+        address _user,
+        uint256 _amount,
+        uint256 _marketID
+    ) internal {
+        vm.prank(_user);
+        marketplaceContract.betMarket{value: _amount}(_marketID, true);
+    }
+
+    function _betNo(
+        address _user,
+        uint256 _amount,
+        uint256 _marketID
+    ) internal {
+        vm.prank(_user);
+        marketplaceContract.betMarket{value: _amount}(_marketID, false);
+    }
 }

@@ -195,6 +195,39 @@ contract MarketplaceFactory is SafeCallback {
         );
     }
 
+    function resolveMarket(uint256 _marketplaceID, uint8 _decision) external {
+        if (msg.sender != agent) revert OnlyAgentAccess();
+        if (_decision > 2) revert IncorrectDecision();
+        if (_marketplaceID >= marketplaceID) revert InvalidMarketplaceID();
+        Marketplace storage currentMarket = marketplaces[_marketplaceID];
+        if (currentMarket.resolved) revert MarketEnded();
+
+        currentMarket.resolved = true;
+        currentMarket.outcome = _decision;
+        if (_decision == 1) {
+            currentMarket.winningSupplyAtResolve = YesToken(
+                currentMarket.yesToken
+            ).totalSupply();
+            currentMarket.poolWinningBalanceAtResolve = YesToken(
+                currentMarket.yesToken
+            ).balanceOf(address(poolManager));
+        } else if (_decision == 2) {
+            currentMarket.winningSupplyAtResolve = NoToken(
+                currentMarket.noToken
+            ).totalSupply();
+            currentMarket.poolWinningBalanceAtResolve = NoToken(
+                currentMarket.noToken
+            ).balanceOf(address(poolManager));
+        }
+
+        emit MarketResolved(
+            _marketplaceID,
+            currentMarket.title,
+            _decision,
+            currentMarket.winningSupplyAtResolve
+        );
+    }
+
     function withdrawFees() external {
         if (msg.sender != owner) revert OnlyOwnerAccess();
 
